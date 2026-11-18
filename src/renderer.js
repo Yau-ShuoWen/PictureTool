@@ -1,8 +1,7 @@
 const api = window.picturetool;
 const $ = id => document.getElementById(id);
 let root, tree, current, images = [], portals = [], selected = new Set(), queue = [], expanded = new Set();
-let visibleLimit = 60, imageGeneration = 0, thumbnailJobs = [], activeThumbnails = 0;
-const PAGE_SIZE = 60;
+let imageGeneration = 0, thumbnailJobs = [], activeThumbnails = 0;
 const esc = value => String(value).replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
 const short = path => path === root ? '.' : path.slice(root.length + 1);
 function toast(message) { const el = $('toast'); el.textContent = message; el.style.display = 'block'; clearTimeout(toast.timer); toast.timer = setTimeout(() => el.style.display = 'none', 3500); }
@@ -18,19 +17,17 @@ function nodeHtml(node, query = '') {
 function hasMatch(node, q) { return node.name.toLowerCase().includes(q) || node.children.some(x => hasMatch(x, q)); }
 function findNode(node, folder) { if (node.path === folder) return node; for (const child of node.children) { const found = findNode(child, folder); if (found) return found; } return null; }
 function renderTree() { $('tree').innerHTML = nodeHtml(tree, $('tree-filter').value.trim().toLowerCase()); $('tree').querySelectorAll('.tree-row').forEach(row => { row.onclick = async e => { const folder = row.dataset.folder; if (e.target.classList.contains('tree-toggle')) { const node = findNode(tree, folder); if (expanded.has(folder)) expanded.delete(folder); else { expanded.add(folder); if (!node.loaded) { try { node.children = await api.folderChildren(folder); node.loaded = true; } catch (error) { toast(error.message); } } } renderTree(); } else showFolder(folder); }; row.ondragstart = e => { e.dataTransfer.setData('application/x-picturetool-folder', row.dataset.folder); e.dataTransfer.effectAllowed = 'copy'; }; }); }
-async function showFolder(folder) { current = folder; selected.clear(); visibleLimit = PAGE_SIZE; $('filter').value = ''; $('folder-title').textContent = folder === root ? '全部图片' : folder.split(/[\\/]/).at(-1); $('folder-path').textContent = folder; $('images').innerHTML = '<div class="empty">正在读取图片…</div>'; renderTree(); try { const result = await api.folder(folder); if (current !== folder) return; images = result; renderImages(); } catch (e) { toast(e.message); } }
+async function showFolder(folder) { current = folder; selected.clear(); $('filter').value = ''; $('folder-title').textContent = folder === root ? '全部图片' : folder.split(/[\\/]/).at(-1); $('folder-path').textContent = folder; $('images').innerHTML = '<div class="empty">正在读取图片…</div>'; renderTree(); try { const result = await api.folder(folder); if (current !== folder) return; images = result; renderImages(); } catch (e) { toast(e.message); } }
 function pumpThumbnails() { while (activeThumbnails < 2 && thumbnailJobs.length) { const job = thumbnailJobs.shift(); if (job.generation !== imageGeneration || !job.card.isConnected) continue; activeThumbnails++; api.thumbnail(job.path).then(data => { if (data && job.generation === imageGeneration && job.card.isConnected) { const img = document.createElement('img'); img.src = data; img.alt = ''; job.card.querySelector('.thumb').replaceChildren(img); } }).catch(() => {}).finally(() => { activeThumbnails--; pumpThumbnails(); }); } }
 function renderImages() {
   imageGeneration++; thumbnailJobs = [];
   const generation = imageGeneration;
   const q = $('filter').value.trim().toLowerCase();
   const matches = images.filter(x => x.name.toLowerCase().includes(q));
-  const list = matches.slice(0, visibleLimit);
+  const list = matches;
   $('image-count').textContent = `${images.length} 张`;
   $('selected-count').textContent = selected.size ? `已选择 ${selected.size} 张` : '未选择图片';
   $('images').innerHTML = list.length ? list.map(x => `<div class="image-card ${selected.has(x.path) ? 'selected' : ''}" draggable="true" data-image="${esc(x.path)}" title="${esc(x.name)}"><div class="thumb"><span>图片</span></div><div class="image-name">${esc(x.name)}</div></div>`).join('') : '<div class="empty">当前文件夹没有符合条件的图片</div>';
-  if (matches.length > visibleLimit) $('images').insertAdjacentHTML('beforeend', `<button class="load-more" id="load-more">继续显示（已显示 ${visibleLimit} / ${matches.length} 张）</button>`);
-  $('load-more')?.addEventListener('click', () => { visibleLimit += PAGE_SIZE; renderImages(); });
   const cards = [...$('images').querySelectorAll('.image-card')];
   function updateSelection() { $('selected-count').textContent = selected.size ? `已选择 ${selected.size} 张` : '未选择图片'; for (const card of cards) card.classList.toggle('selected', selected.has(card.dataset.image)); }
   for (const card of cards) {
@@ -48,4 +45,4 @@ function showQueue() { const groups = new Map(); queue.forEach((x, i) => groups.
 async function showHistory() { const rows = await api.history(); openModal('整理记录', rows.length ? rows.map(x => `<div class="history-item"><strong>${esc(new Date(x.time).toLocaleString('zh-CN'))} · 移动 ${x.items.length} 张${x.incomplete ? '（部分完成）' : ''}</strong><div>${x.items.map(i => `<div class="queue-item">${esc(i.from)} → ${esc(i.to)}</div>`).join('')}</div></div>`).join('') : '<div class="empty">还没有整理记录</div>', [action('关闭', closeModal)]); }
 async function showDuplicates() { openModal('查找重复', '<div class="empty">正在对图片计算内容指纹，请稍候…</div>', [action('关闭', closeModal)]); try { const r = await api.duplicates(); $('modal-body').innerHTML = `<p style="margin-bottom:14px;color:#686e67">扫描 ${r.scanned} 张图片，发现 ${r.groups.length} 组内容完全相同的文件。</p>` + (r.groups.length ? r.groups.map((g, i) => `<div class="duplicate-group"><strong>第 ${i+1} 组 · ${g.length} 张</strong>${g.map(p => `<div class="queue-item">${esc(short(p))}</div>`).join('')}</div>`).join('') : '<div class="empty">没有发现内容完全相同的图片</div>'); } catch(e) { $('modal-body').textContent = e.message; } }
 async function init() { try { const data = await api.initial(); root = data.root; tree = data.tree; portals = data.settings.portals || []; expanded.add(root); $('root-label').textContent = root; $('portals').ondragover = e => e.preventDefault(); $('portals').ondrop = async e => { if (e.target.closest('.portal')) return; e.preventDefault(); const folder = e.dataTransfer.getData('application/x-picturetool-folder'); if (folder && !portals.includes(folder)) { portals = await api.portals([...portals, folder]); renderPortals(); toast('已创建传送门'); } }; renderPortals(); await showFolder(root); } catch(e) { $('images').innerHTML = `<div class="empty">无法打开图片目录：${esc(e.message)}</div>`; } }
-$('filter').oninput = () => { visibleLimit = PAGE_SIZE; renderImages(); }; $('tree-filter').oninput = renderTree; $('select-all').onclick = () => { selected = new Set(images.filter(x => x.name.toLowerCase().includes($('filter').value.trim().toLowerCase())).map(x => x.path)); renderImages(); }; $('queue-btn').onclick = showQueue; $('history-btn').onclick = showHistory; $('duplicates-btn').onclick = showDuplicates; $('modal-close').onclick = closeModal; init();
+$('filter').oninput = renderImages; $('tree-filter').oninput = renderTree; $('select-all').onclick = () => { selected = new Set(images.filter(x => x.name.toLowerCase().includes($('filter').value.trim().toLowerCase())).map(x => x.path)); renderImages(); }; $('queue-btn').onclick = showQueue; $('history-btn').onclick = showHistory; $('duplicates-btn').onclick = showDuplicates; $('modal-close').onclick = closeModal; init();

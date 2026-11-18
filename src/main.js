@@ -49,7 +49,7 @@ app.whenReady().then(async () => {
     if (parent === workspace) { workspace = app.getPath('userData'); break; }
     workspace = parent;
   }
-  thumbnailDir = path.join(workspace, '.picturetool', 'thumbs');
+  thumbnailDir = path.join(workspace, '.picturetool', 'thumbs-v2');
   const win = new BrowserWindow({ width: 1500, height: 920, minWidth: 1050, minHeight: 650, backgroundColor: '#f5f3ee', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
   ipcMain.handle('initial', async () => ({ root: ROOT, tree: await folderLevel(ROOT), settings: await loadSettings() }));
   ipcMain.handle('folder-children', async (_, dir) => (await folderLevel(dir, 1)).children);
@@ -67,7 +67,9 @@ app.whenReady().then(async () => {
     catch (error) { if (error.code !== 'ENOENT') throw error; }
     const image = nativeImage.createFromPath(file);
     if (image.isEmpty()) return '';
-    const png = image.resize({ width: 240, height: 180, quality: 'good' }).toPNG();
+    const { width, height } = image.getSize();
+    const scale = Math.min(1, 240 / width, 180 / height);
+    const png = image.resize({ width: Math.max(1, Math.round(width * scale)), quality: 'good' }).toPNG();
     await fs.mkdir(thumbnailDir, { recursive: true });
     await fs.writeFile(cached, png);
     return `data:image/png;base64,${png.toString('base64')}`;
