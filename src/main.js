@@ -7,6 +7,7 @@ const ROOT = process.env.PICTURETOOL_ROOT || 'F:\\哏圖';
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.tif', '.tiff']);
 let settingsPath;
 let historyPath;
+let thumbnailDir;
 
 function inside(value) {
   const absolute = path.resolve(value);
@@ -24,9 +25,9 @@ async function loadSettings() {
   catch { return { portals: [] }; }
 }
 async function saveSettings(data) { await fs.writeFile(settingsPath, JSON.stringify(data, null, 2), 'utf8'); }
-async function walkFolders(dir, depth = 0) {
+async function folderLevel(dir, depth = 0) {
   const children = (await entries(dir)).filter(x => x.isDirectory()).sort((a, b) => a.name.localeCompare(b.name, 'zh'));
-  return { path: dir, name: depth ? path.basename(dir) : path.basename(ROOT), children: await Promise.all(children.map(x => walkFolders(path.join(dir, x.name), depth + 1))) };
+  return { path: dir, name: depth ? path.basename(dir) : path.basename(ROOT), loaded: true, children: children.map(x => ({ path: path.join(dir, x.name), name: x.name, loaded: false, children: [] })) };
 }
 async function hash(file) {
   const handle = await fs.open(file, 'r');
@@ -40,20 +41,36 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   settingsPath = path.join(app.getPath('userData'), 'settings.json');
   historyPath = path.join(app.getPath('userData'), 'history.jsonl');
+  let workspace = path.dirname(app.getPath('exe'));
+  for (let i = 0; i < 5; i++) {
+    try { if (JSON.parse(await fs.readFile(path.join(workspace, 'package.json'), 'utf8')).name === 'picturetool') break; }
+    catch { /* 继续向上查找工作区 */ }
+    const parent = path.dirname(workspace);
+    if (parent === workspace) { workspace = app.getPath('userData'); break; }
+    workspace = parent;
+  }
+  thumbnailDir = path.join(workspace, '.picturetool', 'thumbs');
   const win = new BrowserWindow({ width: 1500, height: 920, minWidth: 1050, minHeight: 650, backgroundColor: '#f5f3ee', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
-  ipcMain.handle('initial', async () => ({ root: ROOT, tree: await walkFolders(ROOT), settings: await loadSettings() }));
+  ipcMain.handle('initial', async () => ({ root: ROOT, tree: await folderLevel(ROOT), settings: await loadSettings() }));
+  ipcMain.handle('folder-children', async (_, dir) => (await folderLevel(dir, 1)).children);
   ipcMain.handle('folder', async (_, dir) => {
     const items = await entries(dir);
-    const images = await Promise.all(items.filter(x => x.isFile()).map(async x => {
-      const file = path.join(dir, x.name); const stat = await fs.stat(file);
-      return { path: file, name: x.name, size: stat.size, modified: stat.mtimeMs };
-    }));
+    const images = items.filter(x => x.isFile()).map(x => ({ path: path.join(dir, x.name), name: x.name }));
     return images.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
   });
   ipcMain.handle('thumbnail', async (_, file) => {
     inside(file);
+    const stat = await fs.stat(file);
+    const key = crypto.createHash('sha256').update(`${file}\0${stat.size}\0${stat.mtimeMs}`).digest('hex');
+    const cached = path.join(thumbnailDir, `${key}.png`);
+    try { return `data:image/png;base64,${(await fs.readFile(cached)).toString('base64')}`; }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
     const image = nativeImage.createFromPath(file);
-    return image.isEmpty() ? '' : image.resize({ width: 360, height: 280, quality: 'good' }).toDataURL();
+    if (image.isEmpty()) return '';
+    const png = image.resize({ width: 240, height: 180, quality: 'good' }).toPNG();
+    await fs.mkdir(thumbnailDir, { recursive: true });
+    await fs.writeFile(cached, png);
+    return `data:image/png;base64,${png.toString('base64')}`;
   });
   ipcMain.handle('portals', async (_, portals) => {
     const unique = [...new Set(portals.map(inside))];

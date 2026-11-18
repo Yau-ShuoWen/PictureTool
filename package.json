@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "check": "node --check src/main.js && node --check src/preload.js && node --check src/renderer.js",
-    "package:win": "electron-packager . 哏圖整理 --platform=win32 --arch=x64 --out=dist/v0.1.1 --overwrite --prune --ignore=^/dist$ --ignore=^/docs$ --ignore=^/\\.git$"
+    "package:win": "electron-packager . 哏圖整理 --platform=win32 --arch=x64 --out=dist/v0.1.2 --overwrite --prune --ignore=^/dist$ --ignore=^/docs$ --ignore=^/\\.git$"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
