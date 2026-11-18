@@ -29,6 +29,10 @@ async function folderLevel(dir, depth = 0) {
   const children = (await entries(dir)).filter(x => x.isDirectory()).sort((a, b) => a.name.localeCompare(b.name, 'zh'));
   return { path: dir, name: depth ? path.basename(dir) : path.basename(ROOT), loaded: true, children: children.map(x => ({ path: path.join(dir, x.name), name: x.name, loaded: false, children: [] })) };
 }
+async function fullFolderTree(dir, depth = 0) {
+  const children = (await entries(dir)).filter(x => x.isDirectory()).sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+  return { path: dir, name: depth ? path.basename(dir) : path.basename(ROOT), loaded: true, children: await Promise.all(children.map(x => fullFolderTree(path.join(dir, x.name), depth + 1))) };
+}
 async function hash(file) {
   const handle = await fs.open(file, 'r');
   const h = crypto.createHash('sha256');
@@ -52,6 +56,7 @@ app.whenReady().then(async () => {
   thumbnailDir = path.join(workspace, '.picturetool', 'thumbs-v2');
   const win = new BrowserWindow({ width: 1500, height: 920, minWidth: 1050, minHeight: 650, backgroundColor: '#f5f3ee', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
   ipcMain.handle('initial', async () => ({ root: ROOT, tree: await folderLevel(ROOT), settings: await loadSettings() }));
+  ipcMain.handle('full-tree', async () => fullFolderTree(ROOT));
   ipcMain.handle('folder-children', async (_, dir) => (await folderLevel(dir, 1)).children);
   ipcMain.handle('folder', async (_, dir) => {
     const items = await entries(dir);
