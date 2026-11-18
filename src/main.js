@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, nativeImage, Menu } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -37,10 +37,10 @@ async function hash(file) {
 }
 
 app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null);
   settingsPath = path.join(app.getPath('userData'), 'settings.json');
   historyPath = path.join(app.getPath('userData'), 'history.jsonl');
   const win = new BrowserWindow({ width: 1500, height: 920, minWidth: 1050, minHeight: 650, backgroundColor: '#f5f3ee', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
-  await win.loadFile(path.join(__dirname, 'index.html'));
   ipcMain.handle('initial', async () => ({ root: ROOT, tree: await walkFolders(ROOT), settings: await loadSettings() }));
   ipcMain.handle('folder', async (_, dir) => {
     const items = await entries(dir);
@@ -102,5 +102,6 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('reveal', async (_, file) => { inside(file); const { shell } = require('electron'); shell.showItemInFolder(file); });
   ipcMain.handle('choose-folder', async () => { const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'] }); return result.canceled ? null : result.filePaths[0]; });
+  await win.loadFile(path.join(__dirname, 'index.html'));
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
