@@ -4,7 +4,9 @@
 
 ## 运行
 
-需要 Node.js。运行 `npm install`，然后运行 `npm start`。可通过环境变量 `PICTURETOOL_ROOT` 指定其他图片根目录。
+开发运行需要 Node.js。运行 `npm install`，然后运行 `npm start`。
+
+Windows 直接使用：双击 `dist/哏圖整理-win32-x64/哏圖整理.exe`。请保留该目录中的其他文件，不要只复制 exe。重新打包时运行 `npm run package:win`。程序默认打开 `F:\哏圖`，也可通过环境变量 `PICTURETOOL_ROOT` 指定其他图片根目录。
 
 ## 第一版操作
 
