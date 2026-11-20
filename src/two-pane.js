@@ -10,7 +10,7 @@ function drawShell(p) {
   panel(p).innerHTML = `<div class="pane-path"><button class="pane-up" aria-label="上一级">↑</button><span class="pane-path-label"></span></div><div class="pane-actions"><input class="pane-filter" placeholder="查询所有文件夹" aria-label="查询所有文件夹"></div><div class="pane-content"><div class="pane-items"></div></div>`;
   const el = panel(p);
   el.onpointerdown = () => { activePane = p; };
-  el.querySelector('.pane-up').onclick = () => { if (p.folder !== root) loadPane(p, p.folder.slice(0, p.folder.lastIndexOf('\\'))); };
+  el.querySelector('.pane-up').onclick = () => { if (p.folder === p.shortcutRoot) { const back = p.shortcutReturn; p.shortcutRoot = ''; loadPane(p, back); } else if (p.folder !== root) loadPane(p, p.folder.slice(0, p.folder.lastIndexOf('\\'))); };
   el.querySelector('.pane-filter').oninput = async e => { p.filter = e.target.value.trim().toLowerCase(); const seq = ++p.searchSeq; if (!p.filter) { p.searchResults = []; drawItems(p); return; } try { const found = await api.searchFolders(p.filter); if (seq === p.searchSeq) { p.searchResults = found; drawItems(p); } } catch (error) { toast(error.message); } };
   const content = el.querySelector('.pane-content');
   content.ondragover = e => { if (e.dataTransfer.types.includes('application/x-picturetool-images')) { e.preventDefault(); content.classList.add('drop-target'); } };
@@ -28,11 +28,11 @@ async function loadPane(p, folder) {
 function drawItems(p) {
   const el = panel(p), content = el.querySelector('.pane-content');
   const folders = p.filter ? p.searchResults : p.folders;
-  const folderHtml = folders.map(x => `<div class="folder-card" data-folder="${esc(x.path)}"><div class="folder-cover">${x.cover ? `<img src="${x.cover}" alt="">` : '<span>▰</span>'}</div><div class="folder-card-name">${esc(x.name)}</div></div>`).join('');
+  const folderHtml = folders.map(x => `<div class="folder-card" data-folder="${esc(x.path)}" data-shortcut="${x.shortcut ? '1' : ''}"><div class="folder-cover">${x.cover ? `<img src="${x.cover}" alt="">` : '<span>▰</span>'}</div><div class="folder-card-name">${esc(x.name)}${x.shortcut ? ' ↗' : ''}</div></div>`).join('');
   const images = p.filter ? [] : p.images;
   const imageHtml = images.map(x => `<div class="image-card ${p.selected.has(x.path) ? 'selected' : ''}" draggable="true" data-image="${esc(x.path)}" title="${esc(x.name)}"><div class="thumb">图片</div></div>`).join('');
   el.querySelector('.pane-items').innerHTML = folderHtml + imageHtml;
-  el.querySelectorAll('.folder-card').forEach(card => { card.ondblclick = () => loadPane(p, card.dataset.folder); card.onclick = () => card.classList.toggle('selected'); card.ondragover = e => { e.preventDefault(); }; card.ondrop = e => { e.preventDefault(); e.stopPropagation(); const raw = e.dataTransfer.getData('application/x-picturetool-images'); if (raw) addQueue(JSON.parse(raw), card.dataset.folder); }; });
+  el.querySelectorAll('.folder-card').forEach(card => { card.ondblclick = () => { if (card.dataset.shortcut) { p.shortcutReturn = p.folder; p.shortcutRoot = card.dataset.folder; } loadPane(p, card.dataset.folder); }; card.onclick = () => card.classList.toggle('selected'); card.ondragover = e => { e.preventDefault(); }; card.ondrop = e => { e.preventDefault(); e.stopPropagation(); const raw = e.dataTransfer.getData('application/x-picturetool-images'); if (raw) addQueue(JSON.parse(raw), card.dataset.folder); }; });
   const cards = [...el.querySelectorAll('.pane-items .image-card')];
   cards.forEach((card, index) => {
     card.onclick = e => { const file = card.dataset.image; if (e.shiftKey && p.anchor >= 0) { if (!e.ctrlKey) p.selected.clear(); for (let i = Math.min(index, p.anchor); i <= Math.max(index, p.anchor); i++) p.selected.add(images[i].path); } else if (e.ctrlKey) { p.selected.has(file) ? p.selected.delete(file) : p.selected.add(file); p.anchor = index; } else { p.selected = new Set([file]); p.anchor = index; } updateSelected(p); };

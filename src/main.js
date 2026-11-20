@@ -8,6 +8,7 @@ const sharp = require('sharp');
 const ROOT = process.env.PICTURETOOL_ROOT || 'F:\\哏圖';
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.tif', '.tiff']);
 const NAME_SORT = new Intl.Collator('zh-Hant-TW-u-co-zhuyin', { numeric: true, sensitivity: 'base' });
+const allowedShortcutRoots = new Set();
 let settingsPath;
 let historyPath;
 let thumbnailDir;
@@ -15,13 +16,25 @@ let thumbnailDir;
 function inside(value) {
   const absolute = path.resolve(value);
   const relative = path.relative(path.resolve(ROOT), absolute);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('路径不在图片目录内');
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    if (![...allowedShortcutRoots].some(root => { const sub = path.relative(root, absolute); return !sub.startsWith('..') && !path.isAbsolute(sub); })) throw new Error('路径不在图片目录或快捷方式目标内');
+  }
   return absolute;
 }
 function relative(value) { return path.relative(ROOT, value) || '.'; }
 async function entries(dir) {
   const result = await fs.readdir(inside(dir), { withFileTypes: true });
-  return result.filter(x => x.isDirectory() || (x.isFile() && IMAGE_EXT.has(path.extname(x.name).toLowerCase())));
+  return result.filter(x => x.isDirectory() || (x.isFile() && (IMAGE_EXT.has(path.extname(x.name).toLowerCase()) || path.extname(x.name).toLowerCase() === '.lnk')));
+}
+async function shortcutFolder(file) {
+  try {
+    const raw = shell.readShortcutLink(file).target;
+    if (!raw) return null;
+    const target = path.resolve(raw);
+    if (!(await fs.stat(target)).isDirectory()) return null;
+    allowedShortcutRoots.add(target);
+    return target;
+  } catch { return null; }
 }
 async function loadSettings() {
   try { return JSON.parse(await fs.readFile(settingsPath, 'utf8')); }
@@ -67,9 +80,10 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({ width: 1500, height: 920, minWidth: 1050, minHeight: 650, backgroundColor: '#f5f3ee', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
   ipcMain.handle('initial', async () => ({ root: ROOT, settings: await loadSettings() }));
   ipcMain.handle('folder-list', async (_, dir) => {
-    const folders = (await entries(dir)).filter(x => x.isDirectory()).sort((a, b) => NAME_SORT.compare(a.name, b.name));
+    const items = await entries(dir);
+    const folders = items.filter(x => x.isDirectory()).sort((a, b) => NAME_SORT.compare(a.name, b.name));
     const settings = await loadSettings();
-    return Promise.all(folders.map(async x => {
+    const normal = await Promise.all(folders.map(async x => {
       const folder = path.join(dir, x.name);
       let cover = '';
       const coverPath = settings.covers?.[folder];
@@ -79,12 +93,17 @@ app.whenReady().then(async () => {
       }
       return { path: folder, name: x.name, cover };
     }));
+    const shortcuts = await Promise.all(items.filter(x => x.isFile() && path.extname(x.name).toLowerCase() === '.lnk').map(async x => {
+      const target = await shortcutFolder(path.join(dir, x.name));
+      return target ? { path: target, name: x.name.slice(0, -4), cover: '', shortcut: true } : null;
+    }));
+    return [...normal, ...shortcuts.filter(Boolean)].sort((a, b) => NAME_SORT.compare(a.name, b.name));
   });
   ipcMain.handle('search-folders', async (_, query) => {
     const term = String(query || '').trim().toLowerCase();
     if (!term) return [];
     const found = [];
-    async function visit(dir) { for (const entry of await entries(dir)) if (entry.isDirectory()) { const folder = path.join(dir, entry.name); if (entry.name.toLowerCase().includes(term)) found.push({ path: folder, name: entry.name, cover: '' }); await visit(folder); } }
+    async function visit(dir) { for (const entry of await entries(dir)) { const file = path.join(dir, entry.name); if (entry.isDirectory()) { if (entry.name.toLowerCase().includes(term)) found.push({ path: file, name: entry.name, cover: '' }); await visit(file); } else if (path.extname(entry.name).toLowerCase() === '.lnk' && entry.name.toLowerCase().includes(term)) { const target = await shortcutFolder(file); if (target) found.push({ path: target, name: entry.name.slice(0, -4), cover: '', shortcut: true }); } } }
     await visit(ROOT);
     return found.sort((a, b) => NAME_SORT.compare(a.name, b.name));
   });
@@ -108,7 +127,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('folder', async (_, dir) => {
     const items = await entries(dir);
-    const images = await Promise.all(items.filter(x => x.isFile()).map(async x => { const file = path.join(dir, x.name); return { path: file, name: x.name, modified: (await fs.stat(file)).mtimeMs }; }));
+    const images = await Promise.all(items.filter(x => x.isFile() && IMAGE_EXT.has(path.extname(x.name).toLowerCase())).map(async x => { const file = path.join(dir, x.name); return { path: file, name: x.name, modified: (await fs.stat(file)).mtimeMs }; }));
     return images.sort((a, b) => b.modified - a.modified || NAME_SORT.compare(a.name, b.name));
   });
   ipcMain.handle('thumbnail', async (_, file) => {
@@ -146,7 +165,15 @@ app.whenReady().then(async () => {
       await saveSettings(settings);
     }
     for (const item of planned) {
-      try { await fs.rename(item.source, item.destination); moved.push(item); }
+      try {
+        try { await fs.rename(item.source, item.destination); }
+        catch (error) {
+          if (error.code !== 'EXDEV') throw error;
+          await fs.copyFile(item.source, item.destination, require('node:fs').constants.COPYFILE_EXCL);
+          await fs.unlink(item.source);
+        }
+        moved.push(item);
+      }
       catch (error) {
         await clearMovedCovers();
         await fs.appendFile(historyPath, JSON.stringify({ time: new Date().toISOString(), type: 'move', items: moved.map(x => ({ from: relative(x.source), to: relative(x.destination) })), incomplete: true }) + '\n');
