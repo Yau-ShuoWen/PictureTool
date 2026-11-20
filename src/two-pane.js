@@ -7,7 +7,7 @@ function nameOf(path) { return path.split(/[\\/]/).at(-1); }
 function toast(message) { const box = $('toast'); box.textContent = message; box.style.display = 'block'; clearTimeout(toast.timer); toast.timer = setTimeout(() => box.style.display = 'none', 3000); }
 function panel(p) { return $(p.id ? 'right-pane' : 'left-pane'); }
 function drawShell(p) {
-  panel(p).innerHTML = `<div class="pane-head"><div><small>${p.id ? '右侧' : '左侧'}</small><h2 class="pane-title"></h2></div><span class="pane-count"></span></div><div class="pane-path"></div><div class="pane-actions"><input class="pane-filter" placeholder="筛选当前文件夹" aria-label="筛选当前文件夹"><button class="pane-select-all">全选</button><button class="pane-cover" disabled>设为图标</button></div><div class="pane-content"><div class="pane-folders"></div><div class="pane-images"></div></div>`;
+  panel(p).innerHTML = `<div class="pane-head"><div><small>${p.id ? '右侧' : '左侧'}</small><h2 class="pane-title"></h2></div><span class="pane-count"></span></div><div class="pane-path"></div><div class="pane-actions"><input class="pane-filter" placeholder="筛选当前文件夹" aria-label="筛选当前文件夹"><button class="pane-select-all">全选</button><button class="pane-cover" disabled>设为图标</button></div><div class="pane-content"><div class="pane-items"></div></div>`;
   const el = panel(p);
   el.querySelector('.pane-filter').oninput = e => { p.filter = e.target.value.toLowerCase(); drawItems(p); };
   el.querySelector('.pane-select-all').onclick = () => { p.selected = new Set(p.images.filter(x => x.name.toLowerCase().includes(p.filter)).map(x => x.path)); updateSelected(p); };
@@ -33,11 +33,12 @@ function drawItems(p) {
   const el = panel(p), content = el.querySelector('.pane-content');
   el.querySelector('.pane-count').textContent = `${p.folders.length} 文件夹 · ${p.images.length} 图片`;
   const folders = p.folders.filter(x => x.name.toLowerCase().includes(p.filter));
-  el.querySelector('.pane-folders').innerHTML = folders.map(x => `<div class="folder-card" data-folder="${esc(x.path)}"><div class="folder-cover">${x.cover ? `<img src="${x.cover}" alt="">` : '<span>▰</span>'}</div><div class="folder-card-name">${esc(x.name)}</div></div>`).join('');
-  el.querySelectorAll('.folder-card').forEach(card => { card.ondblclick = () => loadPane(p, card.dataset.folder); card.onclick = () => card.classList.toggle('selected'); card.ondragover = e => { e.preventDefault(); }; card.ondrop = e => { e.preventDefault(); e.stopPropagation(); const raw = e.dataTransfer.getData('application/x-picturetool-images'); if (raw) addQueue(JSON.parse(raw), card.dataset.folder); }; });
+  const folderHtml = folders.map(x => `<div class="folder-card" data-folder="${esc(x.path)}"><div class="folder-cover">${x.cover ? `<img src="${x.cover}" alt="">` : '<span>▰</span>'}</div><div class="folder-card-name">${esc(x.name)}</div></div>`).join('');
   const images = p.images.filter(x => x.name.toLowerCase().includes(p.filter));
-  el.querySelector('.pane-images').innerHTML = images.map(x => `<div class="image-card ${p.selected.has(x.path) ? 'selected' : ''}" draggable="true" data-image="${esc(x.path)}" title="${esc(x.name)}"><div class="thumb">图片</div></div>`).join('');
-  const cards = [...el.querySelectorAll('.pane-images .image-card')];
+  const imageHtml = images.map(x => `<div class="image-card ${p.selected.has(x.path) ? 'selected' : ''}" draggable="true" data-image="${esc(x.path)}" title="${esc(x.name)}"><div class="thumb">图片</div></div>`).join('');
+  el.querySelector('.pane-items').innerHTML = folderHtml + imageHtml;
+  el.querySelectorAll('.folder-card').forEach(card => { card.ondblclick = () => loadPane(p, card.dataset.folder); card.onclick = () => card.classList.toggle('selected'); card.ondragover = e => { e.preventDefault(); }; card.ondrop = e => { e.preventDefault(); e.stopPropagation(); const raw = e.dataTransfer.getData('application/x-picturetool-images'); if (raw) addQueue(JSON.parse(raw), card.dataset.folder); }; });
+  const cards = [...el.querySelectorAll('.pane-items .image-card')];
   cards.forEach((card, index) => {
     card.onclick = e => { const file = card.dataset.image; if (e.shiftKey && p.anchor >= 0) { if (!e.ctrlKey) p.selected.clear(); for (let i = Math.min(index, p.anchor); i <= Math.max(index, p.anchor); i++) p.selected.add(images[i].path); } else if (e.ctrlKey) { p.selected.has(file) ? p.selected.delete(file) : p.selected.add(file); p.anchor = index; } else { p.selected = new Set([file]); p.anchor = index; } updateSelected(p); };
     card.ondblclick = () => { preview = images; previewIndex = index; showPreview(); };
@@ -49,14 +50,14 @@ function drawItems(p) {
   function pump() { while (active < 2 && jobs.length) { const card = jobs.shift(); if (generation !== p.generation || !card.isConnected) continue; active++; api.thumbnail(card.dataset.image).then(data => { if (data && generation === p.generation && card.isConnected) { const img = new Image(); img.src = data; card.querySelector('.thumb').replaceChildren(img); } }).catch(() => {}).finally(() => { active--; pump(); }); } }
   const observer = new IntersectionObserver(entries => { for (const entry of entries) if (entry.isIntersecting) { observer.unobserve(entry.target); jobs.push(entry.target); pump(); } }, { root: content, rootMargin: '100px' }); cards.forEach(x => observer.observe(x));
 }
-function updateSelected(p) { const el = panel(p); el.querySelector('.pane-cover').disabled = p.selected.size !== 1; el.querySelectorAll('.pane-images .image-card').forEach(card => card.classList.toggle('selected', p.selected.has(card.dataset.image))); }
+function updateSelected(p) { const el = panel(p); el.querySelector('.pane-cover').disabled = p.selected.size !== 1; el.querySelectorAll('.pane-items .image-card').forEach(card => card.classList.toggle('selected', p.selected.has(card.dataset.image))); }
 function startMarquee(e, p) {
   if (e.button !== 0 || e.target.closest('.image-card,.folder-card,button,input')) return;
   const content = panel(p).querySelector('.pane-content'), origin = { x: e.clientX, y: e.clientY }, initial = e.ctrlKey ? new Set(p.selected) : new Set();
   if (!e.ctrlKey) { p.selected.clear(); updateSelected(p); }
   const box = document.createElement('div'); box.className = 'selection-box'; document.body.append(box);
   content.setPointerCapture(e.pointerId);
-  const move = event => { const l = Math.min(origin.x, event.clientX), t = Math.min(origin.y, event.clientY), r = Math.max(origin.x, event.clientX), b = Math.max(origin.y, event.clientY); Object.assign(box.style, { left: `${l}px`, top: `${t}px`, width: `${r-l}px`, height: `${b-t}px` }); p.selected = new Set(initial); panel(p).querySelectorAll('.pane-images .image-card').forEach(card => { const q = card.getBoundingClientRect(); if (q.left < r && q.right > l && q.top < b && q.bottom > t) p.selected.add(card.dataset.image); }); updateSelected(p); };
+  const move = event => { const l = Math.min(origin.x, event.clientX), t = Math.min(origin.y, event.clientY), r = Math.max(origin.x, event.clientX), b = Math.max(origin.y, event.clientY); Object.assign(box.style, { left: `${l}px`, top: `${t}px`, width: `${r-l}px`, height: `${b-t}px` }); p.selected = new Set(initial); panel(p).querySelectorAll('.pane-items .image-card').forEach(card => { const q = card.getBoundingClientRect(); if (q.left < r && q.right > l && q.top < b && q.bottom > t) p.selected.add(card.dataset.image); }); updateSelected(p); };
   const end = () => { content.removeEventListener('pointermove', move); content.removeEventListener('pointerup', end); content.removeEventListener('pointercancel', end); box.remove(); };
   content.addEventListener('pointermove', move); content.addEventListener('pointerup', end); content.addEventListener('pointercancel', end);
 }
