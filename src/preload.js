@@ -10,5 +10,8 @@ contextBridge.exposeInMainWorld('picturetool', {
   move: items => ipcRenderer.invoke('move', items),
   history: () => ipcRenderer.invoke('history'),
   duplicates: () => ipcRenderer.invoke('duplicates'),
-  reveal: path => ipcRenderer.invoke('reveal', path)
+  reveal: path => ipcRenderer.invoke('reveal', path),
+  openImage: path => ipcRenderer.invoke('open-image', path),
+  previewUrl: path => ipcRenderer.invoke('preview-url', path),
+  previewData: path => ipcRenderer.invoke('preview-data', path)
 });

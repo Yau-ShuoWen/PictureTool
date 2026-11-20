@@ -2,6 +2,9 @@ const api = window.picturetool;
 const $ = id => document.getElementById(id);
 let root, current, images = [], folders = [], portals = [], selected = new Set(), queue = [];
 let imageGeneration = 0, thumbnailJobs = [], activeThumbnails = 0;
+let previewList = [], previewIndex = -1, contextImage = '';
+let previewScale = 1, previewX = 0, previewY = 0, dragStart = null;
+function placePreview() { $('preview-image').style.transform = `translate(${previewX}px, ${previewY}px) scale(${previewScale})`; }
 const esc = value => String(value).replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
 const short = path => path === root ? '.' : path.slice(root.length + 1);
 function toast(message) { const el = $('toast'); el.textContent = message; el.style.display = 'block'; clearTimeout(toast.timer); toast.timer = setTimeout(() => el.style.display = 'none', 3500); }
@@ -18,8 +21,11 @@ function renderBreadcrumbs() {
 function renderFolders() {
   const query = $('tree-filter').value.trim().toLowerCase();
   const visible = folders.filter(x => x.name.toLowerCase().includes(query));
-  $('tree').innerHTML = visible.length ? visible.map(x => `<div class="folder-card" draggable="true" data-folder="${esc(x.path)}"><div class="folder-cover">${x.cover ? `<img src="${x.cover}" alt="">` : '<span>▰</span>'}</div><div class="folder-card-name" title="${esc(x.name)}">${esc(x.name)}</div></div>`).join('') : '<div class="empty">这一层没有符合条件的文件夹</div>';
-  $('tree').querySelectorAll('.folder-card').forEach(card => {
+  const cardHtml = x => `<div class="folder-card" draggable="true" data-folder="${esc(x.path)}"><div class="folder-cover">${x.cover ? `<img src="${x.cover}" alt="">` : '<span>▰</span>'}</div><div class="folder-card-name" title="${esc(x.name)}">${esc(x.name)}</div></div>`;
+  $('tree').innerHTML = visible.length ? visible.map(cardHtml).join('') : '<div class="empty">这一层没有符合条件的文件夹</div>';
+  $('folder-strip').hidden = !folders.length;
+  $('folder-strip').innerHTML = folders.length ? `<div class="folder-strip-title">文件夹 · ${folders.length}</div><div class="folder-strip-grid">${folders.map(cardHtml).join('')}</div>` : '';
+  document.querySelectorAll('.folder-card').forEach(card => {
     card.onclick = () => showFolder(card.dataset.folder);
     card.ondragstart = event => { event.dataTransfer.setData('application/x-picturetool-folder', card.dataset.folder); event.dataTransfer.effectAllowed = 'copy'; };
   });
@@ -30,6 +36,7 @@ async function showFolder(folder) {
   $('folder-path').textContent = folder;
   $('images').innerHTML = '<div class="empty">正在读取图片…</div>';
   $('tree').innerHTML = '<div class="empty">正在读取文件夹…</div>';
+  $('folder-strip').hidden = true;
   renderBreadcrumbs();
   const [imageResult, folderResult] = await Promise.allSettled([api.folder(folder), api.folderList(folder)]);
   if (current !== folder) return;
@@ -48,16 +55,36 @@ function renderImages() {
   $('image-count').textContent = `${images.length} 张`;
   $('selected-count').textContent = selected.size ? `已选择 ${selected.size} 张` : '未选择图片';
   $('set-cover').disabled = selected.size !== 1;
-  $('images').innerHTML = list.length ? list.map(x => `<div class="image-card ${selected.has(x.path) ? 'selected' : ''}" draggable="true" data-image="${esc(x.path)}" title="${esc(x.name)}"><div class="thumb"><span>图片</span></div><div class="image-name">${esc(x.name)}</div></div>`).join('') : '<div class="empty">当前文件夹没有符合条件的图片</div>';
+  $('images').innerHTML = list.length ? list.map(x => `<div class="image-card ${selected.has(x.path) ? 'selected' : ''}" draggable="true" data-image="${esc(x.path)}" title="${esc(x.name)}"><div class="thumb"><span>图片</span></div></div>`).join('') : '<div class="empty">当前文件夹没有符合条件的图片</div>';
   const cards = [...$('images').querySelectorAll('.image-card')];
   function updateSelection() { $('selected-count').textContent = selected.size ? `已选择 ${selected.size} 张` : '未选择图片'; $('set-cover').disabled = selected.size !== 1; for (const card of cards) card.classList.toggle('selected', selected.has(card.dataset.image)); }
   for (const card of cards) {
-    card.onclick = e => { const p = card.dataset.image; if (e.ctrlKey || e.metaKey) selected.has(p) ? selected.delete(p) : selected.add(p); else if (e.shiftKey) selected.add(p); else selected = new Set([p]); updateSelection(); };
-    card.ondblclick = () => api.reveal(card.dataset.image);
+    card.onclick = e => { const p = card.dataset.image; if (e.ctrlKey || e.metaKey) selected.has(p) ? selected.delete(p) : selected.add(p); else if (e.shiftKey) selected.add(p); else { selected = new Set([p]); openPreview(p); } updateSelection(); };
+    card.oncontextmenu = e => { e.preventDefault(); contextImage = card.dataset.image; const menu = $('image-context-menu'); menu.hidden = false; menu.style.left = `${Math.min(e.clientX, window.innerWidth - 190)}px`; menu.style.top = `${Math.min(e.clientY, window.innerHeight - 92)}px`; };
     card.ondragstart = e => { const p = card.dataset.image; if (!selected.has(p)) { selected = new Set([p]); updateSelection(); } e.dataTransfer.setData('application/x-picturetool-images', JSON.stringify([...selected])); e.dataTransfer.effectAllowed = 'move'; };
   }
-  const observer = new IntersectionObserver(entries => { for (const entry of entries) if (entry.isIntersecting) { observer.unobserve(entry.target); thumbnailJobs.push({ card: entry.target, path: entry.target.dataset.image, generation }); pumpThumbnails(); } }, { root: $('images'), rootMargin: '120px' });
+  const observer = new IntersectionObserver(entries => { for (const entry of entries) if (entry.isIntersecting) { observer.unobserve(entry.target); thumbnailJobs.push({ card: entry.target, path: entry.target.dataset.image, generation }); pumpThumbnails(); } }, { root: $('browser-content'), rootMargin: '120px' });
   cards.forEach(x => observer.observe(x));
+}
+async function openPreview(file) {
+  previewList = images.filter(x => x.name.toLowerCase().includes($('filter').value.trim().toLowerCase()));
+  previewIndex = previewList.findIndex(x => x.path === file);
+  if (previewIndex < 0) return;
+  await showPreviewImage();
+  if (!$('preview-dialog').open) $('preview-dialog').showModal();
+}
+async function showPreviewImage() {
+  const file = previewList[previewIndex]?.path;
+  if (!file) return;
+  $('preview-name').textContent = previewList[previewIndex].name;
+  $('preview-image').removeAttribute('src');
+  $('preview-image').dataset.fallback = '';
+  $('preview-image').dataset.file = file;
+  previewScale = 1; previewX = 0; previewY = 0; placePreview();
+  try { $('preview-image').src = await api.previewUrl(file); }
+  catch (error) { toast(error.message); }
+  $('preview-prev').disabled = previewIndex <= 0;
+  $('preview-next').disabled = previewIndex >= previewList.length - 1;
 }
 function renderPortals() {
   $('portals').innerHTML = portals.length ? portals.map(p => `<div class="portal" data-portal="${esc(p)}"><span class="portal-icon">▰</span><div class="portal-info"><div class="portal-name">${esc(p.split(/[\\/]/).at(-1))}</div><div class="portal-path" title="${esc(p)}">${esc(short(p))}</div></div><button title="移除传送门" data-remove="${esc(p)}">×</button></div>`).join('') : '<div class="portal-drop">把右侧的文件夹卡片<br>拖到这里建立传送门</div>';
@@ -77,3 +104,17 @@ async function showHistory() { const rows = await api.history(); openModal('整�
 async function showDuplicates() { openModal('查找重复', '<div class="empty">正在对图片计算内容指纹，请稍候…</div>', [action('关闭', closeModal)]); try { const r = await api.duplicates(); $('modal-body').innerHTML = `<p style="margin-bottom:14px;color:#686e67">扫描 ${r.scanned} 张图片，发现 ${r.groups.length} 组内容完全相同的文件。</p>` + (r.groups.length ? r.groups.map((g, i) => `<div class="duplicate-group"><strong>第 ${i+1} 组 · ${g.length} 张</strong>${g.map(p => `<div class="queue-item">${esc(short(p))}</div>`).join('')}</div>`).join('') : '<div class="empty">没有发现内容完全相同的图片</div>'); } catch(e) { $('modal-body').textContent = e.message; } }
 async function init() { try { const data = await api.initial(); root = data.root; portals = data.settings.portals || []; $('root-label').textContent = root; $('portals').ondragover = e => e.preventDefault(); $('portals').ondrop = async e => { if (e.target.closest('.portal')) return; e.preventDefault(); const folder = e.dataTransfer.getData('application/x-picturetool-folder'); if (folder && !portals.includes(folder)) { portals = await api.portals([...portals, folder]); renderPortals(); toast('已创建传送门'); } }; renderPortals(); await showFolder(root); } catch(e) { $('images').innerHTML = `<div class="empty">无法打开图片目录：${esc(e.message)}</div>`; } }
 $('filter').oninput = renderImages; $('tree-filter').oninput = renderFolders; $('select-all').onclick = () => { selected = new Set(images.filter(x => x.name.toLowerCase().includes($('filter').value.trim().toLowerCase())).map(x => x.path)); renderImages(); }; $('set-cover').onclick = async () => { if (selected.size !== 1) return; try { await api.setCover(current, [...selected][0]); renderPortals(); toast('已设为这个文件夹的图标'); } catch (error) { toast(error.message); } }; $('queue-btn').onclick = showQueue; $('history-btn').onclick = showHistory; $('duplicates-btn').onclick = showDuplicates; $('modal-close').onclick = closeModal; init();
+$('preview-close').onclick = () => $('preview-dialog').close();
+$('preview-prev').onclick = () => { if (previewIndex > 0) { previewIndex--; showPreviewImage(); } };
+$('preview-next').onclick = () => { if (previewIndex < previewList.length - 1) { previewIndex++; showPreviewImage(); } };
+$('preview-image').onerror = async () => { const image = $('preview-image'); if (image.dataset.fallback) return; image.dataset.fallback = '1'; const file = image.dataset.file; try { const data = await api.previewData(file); if (image.dataset.file === file) image.src = data; } catch { toast('无法预览这张图片'); } };
+$('preview-dialog').onkeydown = e => { if (e.key === 'ArrowLeft') $('preview-prev').click(); if (e.key === 'ArrowRight') $('preview-next').click(); };
+$('preview-dialog').onclick = e => { if (e.target === $('preview-dialog')) $('preview-dialog').close(); };
+$('preview-canvas').onwheel = e => { e.preventDefault(); previewScale = Math.max(0.2, Math.min(8, previewScale * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); placePreview(); };
+$('preview-canvas').onpointerdown = e => { dragStart = { x: e.clientX - previewX, y: e.clientY - previewY }; $('preview-canvas').setPointerCapture(e.pointerId); $('preview-canvas').classList.add('dragging'); };
+$('preview-canvas').onpointermove = e => { if (!dragStart) return; previewX = e.clientX - dragStart.x; previewY = e.clientY - dragStart.y; placePreview(); };
+$('preview-canvas').onpointerup = () => { dragStart = null; $('preview-canvas').classList.remove('dragging'); };
+$('preview-canvas').onclick = e => { const r = $('preview-image').getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) $('preview-dialog').close(); };
+$('context-reveal').onclick = () => { $('image-context-menu').hidden = true; api.reveal(contextImage).catch(error => toast(error.message)); };
+$('context-open').onclick = () => { $('image-context-menu').hidden = true; api.openImage(contextImage).catch(error => toast(error.message)); };
+document.addEventListener('click', e => { if (!e.target.closest('#image-context-menu')) $('image-context-menu').hidden = true; });

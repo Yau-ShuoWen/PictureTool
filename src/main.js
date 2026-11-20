@@ -1,10 +1,13 @@
-const { app, BrowserWindow, ipcMain, dialog, nativeImage, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { pathToFileURL } = require('node:url');
+const sharp = require('sharp');
 
 const ROOT = process.env.PICTURETOOL_ROOT || 'F:\\哏圖';
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.tif', '.tiff']);
+const NAME_SORT = new Intl.Collator('zh-Hant-TW-u-co-zhuyin', { numeric: true, sensitivity: 'base' });
 let settingsPath;
 let historyPath;
 let thumbnailDir;
@@ -28,14 +31,12 @@ async function saveSettings(data) { await fs.writeFile(settingsPath, JSON.string
 async function thumbnailData(file) {
   const stat = await fs.stat(file);
   const key = crypto.createHash('sha256').update(`${file}\0${stat.size}\0${stat.mtimeMs}`).digest('hex');
-  const cached = path.join(thumbnailDir, `${key}.png`);
+  const cached = path.join(thumbnailDir, `v3-${key}.png`);
   try { return `data:image/png;base64,${(await fs.readFile(cached)).toString('base64')}`; }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const image = nativeImage.createFromPath(file);
-  if (image.isEmpty()) return '';
-  const { width, height } = image.getSize();
-  const scale = Math.min(1, 240 / width, 180 / height);
-  const png = image.resize({ width: Math.max(1, Math.round(width * scale)), quality: 'good' }).toPNG();
+  const png = await sharp(file, { failOn: 'none', animated: false })
+    .rotate().resize(480, 360, { fit: 'inside', withoutEnlargement: true, kernel: 'lanczos3' })
+    .png({ compressionLevel: 6 }).toBuffer();
   await fs.mkdir(thumbnailDir, { recursive: true });
   await fs.writeFile(cached, png);
   return `data:image/png;base64,${png.toString('base64')}`;
@@ -66,7 +67,7 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({ width: 1500, height: 920, minWidth: 1050, minHeight: 650, backgroundColor: '#f5f3ee', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
   ipcMain.handle('initial', async () => ({ root: ROOT, settings: await loadSettings() }));
   ipcMain.handle('folder-list', async (_, dir) => {
-    const folders = (await entries(dir)).filter(x => x.isDirectory()).sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+    const folders = (await entries(dir)).filter(x => x.isDirectory()).sort((a, b) => NAME_SORT.compare(a.name, b.name));
     const settings = await loadSettings();
     return Promise.all(folders.map(async x => {
       const folder = path.join(dir, x.name);
@@ -90,8 +91,8 @@ app.whenReady().then(async () => {
     const target = inside(folder), source = inside(file);
     if (path.dirname(source) !== target) throw new Error('请选择当前文件夹中的一张图片');
     if (!IMAGE_EXT.has(path.extname(source).toLowerCase())) throw new Error('请选择图片文件');
-    const image = nativeImage.createFromPath(source);
-    if (image.isEmpty()) throw new Error('无法读取这张图片');
+    const metadata = await sharp(source).metadata();
+    if (!metadata.width || !metadata.height) throw new Error('无法读取这张图片');
     const settings = await loadSettings();
     settings.covers = { ...settings.covers, [target]: source };
     await saveSettings(settings);
@@ -100,7 +101,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('folder', async (_, dir) => {
     const items = await entries(dir);
     const images = items.filter(x => x.isFile()).map(x => ({ path: path.join(dir, x.name), name: x.name }));
-    return images.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+    return images.sort((a, b) => NAME_SORT.compare(a.name, b.name));
   });
   ipcMain.handle('thumbnail', async (_, file) => {
     inside(file);
@@ -162,7 +163,10 @@ app.whenReady().then(async () => {
     for (const group of bySize.values()) if (group.length > 1) for (const file of group) { const key = await hash(file.path); byHash.set(key, [...(byHash.get(key) || []), file.path]); }
     return { scanned: files.length, groups: [...byHash.values()].filter(x => x.length > 1) };
   });
-  ipcMain.handle('reveal', async (_, file) => { inside(file); const { shell } = require('electron'); shell.showItemInFolder(file); });
+  ipcMain.handle('reveal', async (_, file) => { inside(file); shell.showItemInFolder(file); });
+  ipcMain.handle('open-image', async (_, file) => { inside(file); const error = await shell.openPath(file); if (error) throw new Error(error); });
+  ipcMain.handle('preview-url', async (_, file) => { inside(file); return pathToFileURL(file).href; });
+  ipcMain.handle('preview-data', async (_, file) => { inside(file); const png = await sharp(file, { animated: false }).rotate().resize(2400, 2400, { fit: 'inside', withoutEnlargement: true }).png().toBuffer(); return `data:image/png;base64,${png.toString('base64')}`; });
   ipcMain.handle('choose-folder', async () => { const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'] }); return result.canceled ? null : result.filePaths[0]; });
   await win.loadFile(path.join(__dirname, 'index.html'));
 });
