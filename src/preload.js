@@ -1,8 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('picturetool', {
   initial: () => ipcRenderer.invoke('initial'),
-  fullTree: () => ipcRenderer.invoke('full-tree'),
-  folderChildren: path => ipcRenderer.invoke('folder-children', path),
+  folderList: path => ipcRenderer.invoke('folder-list', path),
+  folderCover: path => ipcRenderer.invoke('folder-cover', path),
+  setCover: (folder, file) => ipcRenderer.invoke('set-cover', folder, file),
   folder: path => ipcRenderer.invoke('folder', path),
   thumbnail: path => ipcRenderer.invoke('thumbnail', path),
   portals: paths => ipcRenderer.invoke('portals', paths),
