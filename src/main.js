@@ -44,7 +44,7 @@ async function saveSettings(data) { await fs.writeFile(settingsPath, JSON.string
 async function thumbnailData(file) {
   const stat = await fs.stat(file);
   const key = crypto.createHash('sha256').update(`${file}\0${stat.size}\0${stat.mtimeMs}`).digest('hex');
-  const cached = path.join(thumbnailDir, `v3-${key}.png`);
+  const cached = path.join(thumbnailDir, `v4-${key}.png`);
   try { return `data:image/png;base64,${(await fs.readFile(cached)).toString('base64')}`; }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   const png = await sharp(file, { failOn: 'none', animated: false })
