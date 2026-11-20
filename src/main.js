@@ -80,6 +80,14 @@ app.whenReady().then(async () => {
       return { path: folder, name: x.name, cover };
     }));
   });
+  ipcMain.handle('search-folders', async (_, query) => {
+    const term = String(query || '').trim().toLowerCase();
+    if (!term) return [];
+    const found = [];
+    async function visit(dir) { for (const entry of await entries(dir)) if (entry.isDirectory()) { const folder = path.join(dir, entry.name); if (entry.name.toLowerCase().includes(term)) found.push({ path: folder, name: entry.name, cover: '' }); await visit(folder); } }
+    await visit(ROOT);
+    return found.sort((a, b) => NAME_SORT.compare(a.name, b.name));
+  });
   ipcMain.handle('folder-cover', async (_, folder) => {
     const target = inside(folder);
     const source = (await loadSettings()).covers?.[target];
@@ -100,8 +108,8 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('folder', async (_, dir) => {
     const items = await entries(dir);
-    const images = items.filter(x => x.isFile()).map(x => ({ path: path.join(dir, x.name), name: x.name }));
-    return images.sort((a, b) => NAME_SORT.compare(a.name, b.name));
+    const images = await Promise.all(items.filter(x => x.isFile()).map(async x => { const file = path.join(dir, x.name); return { path: file, name: x.name, modified: (await fs.stat(file)).mtimeMs }; }));
+    return images.sort((a, b) => b.modified - a.modified || NAME_SORT.compare(a.name, b.name));
   });
   ipcMain.handle('thumbnail', async (_, file) => {
     inside(file);

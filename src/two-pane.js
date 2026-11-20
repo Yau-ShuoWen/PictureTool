@@ -1,17 +1,17 @@
 const api = window.picturetool;
 const $ = id => document.getElementById(id);
-const panes = [0, 1].map((id) => ({ id, folder: '', images: [], folders: [], selected: new Set(), anchor: -1, filter: '', generation: 0 }));
-let root = '', queue = [], preview = [], previewIndex = -1, contextFile = '', scale = 1, offsetX = 0, offsetY = 0, dragOrigin = null;
+const panes = [0, 1].map((id) => ({ id, folder: '', images: [], folders: [], selected: new Set(), anchor: -1, filter: '', searchResults: [], searchSeq: 0, generation: 0 }));
+let root = '', queue = [], preview = [], previewIndex = -1, contextFile = '', contextPane = null, activePane = panes[0], scale = 1, offsetX = 0, offsetY = 0, dragOrigin = null;
 const esc = value => String(value).replace(/[&<>"']/g, x => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[x]));
 function nameOf(path) { return path.split(/[\\/]/).at(-1); }
 function toast(message) { const box = $('toast'); box.textContent = message; box.style.display = 'block'; clearTimeout(toast.timer); toast.timer = setTimeout(() => box.style.display = 'none', 3000); }
 function panel(p) { return $(p.id ? 'right-pane' : 'left-pane'); }
 function drawShell(p) {
-  panel(p).innerHTML = `<div class="pane-head"><div><small>${p.id ? '右侧' : '左侧'}</small><h2 class="pane-title"></h2></div><span class="pane-count"></span></div><div class="pane-path"></div><div class="pane-actions"><input class="pane-filter" placeholder="筛选当前文件夹" aria-label="筛选当前文件夹"><button class="pane-select-all">全选</button><button class="pane-cover" disabled>设为图标</button></div><div class="pane-content"><div class="pane-items"></div></div>`;
+  panel(p).innerHTML = `<div class="pane-path"><button class="pane-up" aria-label="上一级">↑</button><span class="pane-path-label"></span></div><div class="pane-actions"><input class="pane-filter" placeholder="查询所有文件夹" aria-label="查询所有文件夹"></div><div class="pane-content"><div class="pane-items"></div></div>`;
   const el = panel(p);
-  el.querySelector('.pane-filter').oninput = e => { p.filter = e.target.value.toLowerCase(); drawItems(p); };
-  el.querySelector('.pane-select-all').onclick = () => { p.selected = new Set(p.images.filter(x => x.name.toLowerCase().includes(p.filter)).map(x => x.path)); updateSelected(p); };
-  el.querySelector('.pane-cover').onclick = async () => { if (p.selected.size !== 1) return; try { await api.setCover(p.folder, [...p.selected][0]); toast('文件夹图标已设置'); await Promise.all(panes.map(x => loadPane(x, x.folder))); } catch (e) { toast(e.message); } };
+  el.onpointerdown = () => { activePane = p; };
+  el.querySelector('.pane-up').onclick = () => { if (p.folder !== root) loadPane(p, p.folder.slice(0, p.folder.lastIndexOf('\\'))); };
+  el.querySelector('.pane-filter').oninput = async e => { p.filter = e.target.value.trim().toLowerCase(); const seq = ++p.searchSeq; if (!p.filter) { p.searchResults = []; drawItems(p); return; } try { const found = await api.searchFolders(p.filter); if (seq === p.searchSeq) { p.searchResults = found; drawItems(p); } } catch (error) { toast(error.message); } };
   const content = el.querySelector('.pane-content');
   content.ondragover = e => { if (e.dataTransfer.types.includes('application/x-picturetool-images')) { e.preventDefault(); content.classList.add('drop-target'); } };
   content.ondragleave = e => { if (!content.contains(e.relatedTarget)) content.classList.remove('drop-target'); };
@@ -20,21 +20,16 @@ function drawShell(p) {
 }
 async function loadPane(p, folder) {
   p.folder = folder; p.selected.clear(); p.filter = ''; p.generation++;
-  const el = panel(p); el.querySelector('.pane-title').textContent = nameOf(folder); el.querySelector('.pane-filter').value = '';
-  const parts = folder === root ? [] : folder.slice(root.length + 1).split(/[\\/]/);
-  const paths = [root]; for (const part of parts) paths.push(`${paths.at(-1)}\\${part}`);
-  el.querySelector('.pane-path').innerHTML = paths.map((x, i) => `<button data-path="${esc(x)}">${esc(i ? parts[i - 1] : nameOf(root))}</button>`).join(' › ');
-  el.querySelectorAll('.pane-path button').forEach(b => b.onclick = () => loadPane(p, b.dataset.path));
+  const el = panel(p); el.querySelector('.pane-path-label').textContent = folder; el.querySelector('.pane-up').disabled = folder === root; el.querySelector('.pane-filter').value = '';
   const [images, folders] = await Promise.all([api.folder(folder), api.folderList(folder)]);
   if (p.folder !== folder) return;
   p.images = images; p.folders = folders; drawItems(p);
 }
 function drawItems(p) {
   const el = panel(p), content = el.querySelector('.pane-content');
-  el.querySelector('.pane-count').textContent = `${p.folders.length} 文件夹 · ${p.images.length} 图片`;
-  const folders = p.folders.filter(x => x.name.toLowerCase().includes(p.filter));
+  const folders = p.filter ? p.searchResults : p.folders;
   const folderHtml = folders.map(x => `<div class="folder-card" data-folder="${esc(x.path)}"><div class="folder-cover">${x.cover ? `<img src="${x.cover}" alt="">` : '<span>▰</span>'}</div><div class="folder-card-name">${esc(x.name)}</div></div>`).join('');
-  const images = p.images.filter(x => x.name.toLowerCase().includes(p.filter));
+  const images = p.filter ? [] : p.images;
   const imageHtml = images.map(x => `<div class="image-card ${p.selected.has(x.path) ? 'selected' : ''}" draggable="true" data-image="${esc(x.path)}" title="${esc(x.name)}"><div class="thumb">图片</div></div>`).join('');
   el.querySelector('.pane-items').innerHTML = folderHtml + imageHtml;
   el.querySelectorAll('.folder-card').forEach(card => { card.ondblclick = () => loadPane(p, card.dataset.folder); card.onclick = () => card.classList.toggle('selected'); card.ondragover = e => { e.preventDefault(); }; card.ondrop = e => { e.preventDefault(); e.stopPropagation(); const raw = e.dataTransfer.getData('application/x-picturetool-images'); if (raw) addQueue(JSON.parse(raw), card.dataset.folder); }; });
@@ -43,14 +38,14 @@ function drawItems(p) {
     card.onclick = e => { const file = card.dataset.image; if (e.shiftKey && p.anchor >= 0) { if (!e.ctrlKey) p.selected.clear(); for (let i = Math.min(index, p.anchor); i <= Math.max(index, p.anchor); i++) p.selected.add(images[i].path); } else if (e.ctrlKey) { p.selected.has(file) ? p.selected.delete(file) : p.selected.add(file); p.anchor = index; } else { p.selected = new Set([file]); p.anchor = index; } updateSelected(p); };
     card.ondblclick = () => { preview = images; previewIndex = index; showPreview(); };
     card.ondragstart = e => { if (!p.selected.has(card.dataset.image)) p.selected = new Set([card.dataset.image]); updateSelected(p); e.dataTransfer.setData('application/x-picturetool-images', JSON.stringify([...p.selected])); e.dataTransfer.effectAllowed = 'move'; };
-    card.oncontextmenu = e => { e.preventDefault(); contextFile = card.dataset.image; const menu = $('image-context-menu'); menu.hidden = false; menu.style.left = `${Math.min(e.clientX, innerWidth - 190)}px`; menu.style.top = `${Math.min(e.clientY, innerHeight - 90)}px`; };
+    card.oncontextmenu = e => { e.preventDefault(); contextFile = card.dataset.image; contextPane = p; const menu = $('image-context-menu'); menu.hidden = false; menu.style.left = `${Math.min(e.clientX, innerWidth - 190)}px`; menu.style.top = `${Math.min(e.clientY, innerHeight - 120)}px`; };
   });
   updateSelected(p);
   const generation = ++p.generation, jobs = []; let active = 0;
   function pump() { while (active < 2 && jobs.length) { const card = jobs.shift(); if (generation !== p.generation || !card.isConnected) continue; active++; api.thumbnail(card.dataset.image).then(data => { if (data && generation === p.generation && card.isConnected) { const img = new Image(); img.src = data; card.querySelector('.thumb').replaceChildren(img); } }).catch(() => {}).finally(() => { active--; pump(); }); } }
   const observer = new IntersectionObserver(entries => { for (const entry of entries) if (entry.isIntersecting) { observer.unobserve(entry.target); jobs.push(entry.target); pump(); } }, { root: content, rootMargin: '100px' }); cards.forEach(x => observer.observe(x));
 }
-function updateSelected(p) { const el = panel(p); el.querySelector('.pane-cover').disabled = p.selected.size !== 1; el.querySelectorAll('.pane-items .image-card').forEach(card => card.classList.toggle('selected', p.selected.has(card.dataset.image))); }
+function updateSelected(p) { panel(p).querySelectorAll('.pane-items .image-card').forEach(card => card.classList.toggle('selected', p.selected.has(card.dataset.image))); }
 function startMarquee(e, p) {
   if (e.button !== 0 || e.target.closest('.image-card,.folder-card,button,input')) return;
   const content = panel(p).querySelector('.pane-content'), origin = { x: e.clientX, y: e.clientY }, initial = e.ctrlKey ? new Set(p.selected) : new Set();
@@ -80,5 +75,7 @@ $('preview-canvas').onpointerup = () => { dragOrigin = null; };
 $('preview-canvas').onclick = e => { const q = $('preview-image').getBoundingClientRect(); if (e.clientX < q.left || e.clientX > q.right || e.clientY < q.top || e.clientY > q.bottom) $('preview-dialog').close(); };
 $('preview-dialog').onkeydown = e => { if (e.key === 'ArrowLeft') $('preview-prev').click(); if (e.key === 'ArrowRight') $('preview-next').click(); };
 $('context-reveal').onclick = () => { $('image-context-menu').hidden = true; api.reveal(contextFile); }; $('context-open').onclick = () => { $('image-context-menu').hidden = true; api.openImage(contextFile); };
+$('context-cover').onclick = async () => { $('image-context-menu').hidden = true; try { await api.setCover(contextPane.folder, contextFile); toast('文件夹图标已设置'); await Promise.all(panes.map(p => loadPane(p, p.folder))); } catch (error) { toast(error.message); } };
+document.addEventListener('keydown', e => { if (e.ctrlKey && e.key.toLowerCase() === 'a' && !e.target.closest('input,textarea') && !$('preview-dialog').open) { e.preventDefault(); activePane.selected = new Set(activePane.images.map(x => x.path)); updateSelected(activePane); } });
 document.addEventListener('click', e => { if (!e.target.closest('#image-context-menu')) $('image-context-menu').hidden = true; });
 init().catch(e => toast(e.message));

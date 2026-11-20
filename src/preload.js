@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('picturetool', {
   initial: () => ipcRenderer.invoke('initial'),
   folderList: path => ipcRenderer.invoke('folder-list', path),
+  searchFolders: query => ipcRenderer.invoke('search-folders', query),
   folderCover: path => ipcRenderer.invoke('folder-cover', path),
   setCover: (folder, file) => ipcRenderer.invoke('set-cover', folder, file),
   folder: path => ipcRenderer.invoke('folder', path),
