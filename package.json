@@ -1,13 +1,13 @@
 {
   "name": "picturetool",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "本地图片整理工具",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/renderer.js",
-    "package:win": "electron-packager . 哏圖整理 --platform=win32 --arch=x64 --out=dist/v0.3.0 --overwrite --prune --asar.unpack=**/node_modules/@img/sharp-win32-x64/lib/* --ignore=/dist/v --ignore=/\\.picturetool --ignore=/docs$ --ignore=/\\.git"
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/two-pane.js",
+    "package:win": "electron-packager . 哏圖整理 --platform=win32 --arch=x64 --out=dist/v0.4.0 --overwrite --prune --asar.unpack=**/node_modules/@img/sharp-win32-x64/lib/* --ignore=/dist/v --ignore=/\\.picturetool --ignore=/docs$ --ignore=/\\.git"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
