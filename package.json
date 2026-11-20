@@ -1,13 +1,14 @@
 {
   "name": "picturetool",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "private": true,
   "description": "本地图片整理工具",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/two-pane.js",
-    "package:win": "electron-packager . 哏圖整理 --platform=win32 --arch=x64 --out=dist/v0.4.5 --overwrite --prune --asar.unpack=**/node_modules/@img/sharp-win32-x64/lib/* --ignore=/dist/v --ignore=/\\.picturetool --ignore=/docs$ --ignore=/\\.git"
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/two-pane.js && node --check src/thumbnail.js && node --check scripts/rebuild-thumbnails.js",
+    "package:win": "electron-packager . 哏圖整理 --platform=win32 --arch=x64 --out=dist/v0.4.6 --overwrite --prune --asar.unpack=**/node_modules/@img/sharp-win32-x64/lib/* --ignore=/dist/v --ignore=/\\.picturetool --ignore=/docs$ --ignore=/\\.git",
+    "rebuild:thumbnails": "node scripts/rebuild-thumbnails.js"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",

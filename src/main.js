@@ -4,6 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const sharp = require('sharp');
+const { thumbnailData: getThumbnail } = require('./thumbnail');
 
 const ROOT = process.env.PICTURETOOL_ROOT || 'F:\\哏圖';
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.tif', '.tiff']);
@@ -42,17 +43,7 @@ async function loadSettings() {
 }
 async function saveSettings(data) { await fs.writeFile(settingsPath, JSON.stringify(data, null, 2), 'utf8'); }
 async function thumbnailData(file) {
-  const stat = await fs.stat(file);
-  const key = crypto.createHash('sha256').update(`${file}\0${stat.size}\0${stat.mtimeMs}`).digest('hex');
-  const cached = path.join(thumbnailDir, `v4-${key}.png`);
-  try { return `data:image/png;base64,${(await fs.readFile(cached)).toString('base64')}`; }
-  catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const png = await sharp(file, { failOn: 'none', animated: false })
-    .rotate().resize(480, 360, { fit: 'inside', withoutEnlargement: true, kernel: 'lanczos3' })
-    .png({ compressionLevel: 6 }).toBuffer();
-  await fs.mkdir(thumbnailDir, { recursive: true });
-  await fs.writeFile(cached, png);
-  return `data:image/png;base64,${png.toString('base64')}`;
+  return getThumbnail(file, thumbnailDir);
 }
 async function hash(file) {
   const handle = await fs.open(file, 'r');
@@ -76,7 +67,7 @@ app.whenReady().then(async () => {
     if (parent === workspace) { workspace = app.getPath('userData'); break; }
     workspace = parent;
   }
-  thumbnailDir = path.join(workspace, '.picturetool', 'thumbs-v2');
+  thumbnailDir = path.join(workspace, '.picturetool', 'thumbs-v5');
   const win = new BrowserWindow({ width: 1500, height: 920, minWidth: 1050, minHeight: 650, backgroundColor: '#f5f3ee', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
   ipcMain.handle('initial', async () => ({ root: ROOT, settings: await loadSettings() }));
   ipcMain.handle('folder-list', async (_, dir) => {
