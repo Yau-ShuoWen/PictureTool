@@ -47,3 +47,23 @@
 .preview-stage button img{width:23px;height:23px;filter:brightness(0) invert(1)}
 #preview-prev{left:16px}
 #preview-next{right:16px}
+.two-pane{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.file-pane{min-width:0;background:#f7f6f2;display:flex;flex-direction:column}
+.pane-head{padding:17px 20px 8px;display:flex;justify-content:space-between;align-items:end}
+.pane-head small,.pane-count{color:#858782}
+.pane-head h2{margin-top:3px}
+.pane-path{padding:0 20px 8px;white-space:nowrap;overflow-x:auto;color:#777}
+.pane-path button{border:0;background:none;padding:2px;color:#345448}
+.pane-actions{display:flex;gap:8px;padding:0 20px 10px}
+.pane-actions input{min-width:0;flex:1}
+.pane-content{position:relative;flex:1;min-height:0;overflow:auto;padding:0 20px 25px}
+.pane-content.drop-target{outline:2px solid #426b53;outline-offset:-3px}
+.pane-folders,.pane-images{display:grid;grid-template-columns:repeat(auto-fill,minmax(125px,1fr));gap:10px;align-content:start}
+.pane-folders{position:sticky;top:0;z-index:3;background:#f7f6f2;padding:5px 0 10px;max-height:210px;overflow:auto}
+.pane-folders:empty{display:none}
+.pane-folders .folder-cover{height:70px}
+.pane-folders .folder-card.selected{border-color:#315846}
+.pane-images .image-card .thumb{height:145px}
+.selection-box{position:fixed;z-index:10;border:1px solid #3468a8;background:#3f84d633;pointer-events:none}
+#preview-dialog{background:#111b}
+#preview-dialog::backdrop{background:#000a}
